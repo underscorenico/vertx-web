@@ -14,7 +14,6 @@ import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.api.contract.RouterFactoryException;
 import io.vertx.ext.web.api.contract.impl.BaseRouterFactory;
 import io.vertx.ext.web.api.contract.openapi3.OpenAPI3RouterFactory;
-import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.ResponseContentTypeHandler;
 
 import java.util.*;
@@ -192,7 +191,14 @@ public class OpenAPI3RouterFactoryImpl extends BaseRouterFactory<OpenAPI> implem
   @Override
   public Router getRouter() {
     Router router = Router.router(vertx);
-    router.route().handler(options.getBodyHandler());
+    Route globalRoute = router.route();
+    globalRoute.handler(options.getBodyHandler());
+
+    List<Handler<RoutingContext>> globalHandlers = this.getOptions().getGlobalHandlers();
+    for (Handler<RoutingContext> globalHandler: globalHandlers) {
+      globalRoute.handler(globalHandler);
+    }
+
     List<Handler<RoutingContext>> globalSecurityHandlers = securityHandlers
       .solveSecurityHandlers(spec.getSecurity(), this.getOptions().isRequireSecurityHandlers());
     for (OperationValue operation : operations.values()) {
