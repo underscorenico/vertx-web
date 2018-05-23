@@ -791,5 +791,4 @@ public class OpenAPI3RouterFactoryTest extends WebTestWithWebClientBase {
           Paths.get("./my-uploads").toFile().deleteOnExit();
       }
   }
-
 }
