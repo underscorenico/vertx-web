@@ -2,7 +2,6 @@ package io.vertx.ext.web.api.contract.openapi3;
 
 import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
-import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServerOptions;
@@ -15,11 +14,8 @@ import io.vertx.ext.web.api.contract.RouterFactoryException;
 import io.vertx.ext.web.api.contract.RouterFactoryOptions;
 import io.vertx.ext.web.api.validation.ValidationException;
 import io.vertx.ext.web.handler.BodyHandler;
-import io.vertx.serviceproxy.ProxyHelper;
-import io.vertx.serviceproxy.ServiceBinder;
 import org.junit.Test;
 
-import java.net.URLEncoder;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -33,6 +29,9 @@ import java.util.stream.Stream;
 public class OpenAPI3RouterFactoryTest extends WebTestWithWebClientBase {
 
   private OpenAPI3RouterFactory routerFactory;
+
+  private RouterFactoryOptions HANDLERS_TESTS_OPTIONS = new RouterFactoryOptions()
+    .setRequireSecurityHandlers(false);
 
   private Handler<RoutingContext> generateFailureHandler(boolean expected) {
     return routingContext -> {
@@ -178,9 +177,6 @@ public class OpenAPI3RouterFactoryTest extends WebTestWithWebClientBase {
       });
     awaitLatch(latch);
   }
-
-  private RouterFactoryOptions HANDLERS_TESTS_OPTIONS = new RouterFactoryOptions()
-    .setRequireSecurityHandlers(false);
 
   @Test
   public void mountHandlerTest() throws Exception {
@@ -796,36 +792,4 @@ public class OpenAPI3RouterFactoryTest extends WebTestWithWebClientBase {
       }
   }
 
-  @Test
-  public void serviceProxyIntegrationTest() throws Exception {
-    TestService service = new TestServiceImpl(vertx);
-
-    final ServiceBinder serviceBinder = new ServiceBinder(vertx).setAddress("someAddress");
-    MessageConsumer<JsonObject> consumer = serviceBinder.register(TestService.class, service);
-
-    CountDownLatch latch = new CountDownLatch(1);
-    OpenAPI3RouterFactory.create(this.vertx, "src/test/resources/swaggers/router_factory_test.yaml",
-      openAPI3RouterFactoryAsyncResult -> {
-        routerFactory = openAPI3RouterFactoryAsyncResult.result();
-        routerFactory.setOptions(HANDLERS_TESTS_OPTIONS);
-
-        routerFactory.mountOperationToEventBus("testA", "someAddress");
-
-        latch.countDown();
-      });
-    awaitLatch(latch);
-
-    startServer();
-
-    testRequestWithJSON(
-      HttpMethod.POST,
-      "/testA",
-      new JsonObject().put("hello", "Ciao").put("name", "Francesco"),
-      200,
-      "OK",
-      new JsonObject().put("result", "Ciao Francesco!")
-    );
-
-    consumer.unregister();
-  }
 }

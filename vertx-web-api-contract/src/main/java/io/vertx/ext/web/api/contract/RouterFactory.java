@@ -1,6 +1,7 @@
 package io.vertx.ext.web.api.contract;
 
 import io.vertx.codegen.annotations.Fluent;
+import io.vertx.codegen.annotations.GenIgnore;
 import io.vertx.codegen.annotations.VertxGen;
 import io.vertx.core.Handler;
 import io.vertx.core.http.HttpMethod;
@@ -95,6 +96,13 @@ public interface RouterFactory<Specification> {
    */
   @Fluent @Deprecated
   RouterFactory mountOperationsWithoutHandlers(boolean enable);
+
+  @Fluent
+  @GenIgnore
+  RouterFactory mountServiceProxy(Class interfaceClass, String address);
+
+  @Fluent
+  RouterFactory mountOperationToEventBus(String operationId, String address);
 
   /**
    * Construct a new router based on spec. It will fail if you are trying to mount a spec with security schemes

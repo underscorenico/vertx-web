@@ -1,10 +1,7 @@
 package io.vertx.ext.web.api.contract.openapi3;
 
 import io.vertx.core.Handler;
-import io.vertx.core.http.HttpClientOptions;
-import io.vertx.core.http.HttpMethod;
-import io.vertx.core.http.HttpServer;
-import io.vertx.core.http.HttpServerOptions;
+import io.vertx.core.http.*;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
@@ -37,7 +34,7 @@ public class OpenAPI3SchemasTest extends WebTestValidationBase {
       .response()
       .setStatusCode(200)
       .setStatusMessage("OK")
-      .putHeader("Content-Type", "application/json")
+      .putHeader(HttpHeaders.CONTENT_TYPE, "application/json")
       .end(((RequestParameters)routingContext.get("parsedParameters")).body().getJsonObject().encode());
   };
 
