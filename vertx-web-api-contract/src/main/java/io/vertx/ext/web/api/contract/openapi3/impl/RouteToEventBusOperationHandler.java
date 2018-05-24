@@ -12,10 +12,6 @@ import io.vertx.ext.web.api.OperationResult;
 import io.vertx.ext.web.api.RequestContext;
 import io.vertx.ext.web.api.RequestParameters;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-
 public class RouteToEventBusOperationHandler implements Handler<RoutingContext> {
 
   EventBus eventBus;
@@ -40,15 +36,7 @@ public class RouteToEventBusOperationHandler implements Handler<RoutingContext> 
 
   private static JsonObject buildPayload(RoutingContext context) {
     return new JsonObject().put("context", new RequestContext(
-      context.request().headers().entries().stream().reduce(new HashMap<String, List<String>>(), (m, e) -> {
-        if (!m.containsKey(e.getKey()))
-          m.put(e.getKey(), new ArrayList<>());
-        m.get(e.getKey()).add(e.getValue());
-        return m;
-      }, (m1, m2) -> {
-        m1.putAll(m2);
-        return m1;
-      }),
+      context.request().headers(),
       ((RequestParameters)context.get("parsedParameters")).toJsonObject()
     ).toJson());
   }
