@@ -12,6 +12,7 @@ import io.vertx.ext.web.client.WebClientOptions;
 
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author Francesco Guardiani @slinkydeveloper
@@ -34,7 +35,7 @@ public class WebTestWithWebClientBase extends WebTestBase {
   @Override
   public void setUp() throws Exception {
     super.setUp();
-    webClient = WebClient.wrap(client, new WebClientOptions().setConnectTimeout(Integer.MAX_VALUE).setIdleTimeout(Integer.MAX_VALUE));
+    webClient = WebClient.wrap(client, new WebClientOptions().setConnectTimeout(Integer.MAX_VALUE).setIdleTimeout(Integer.MAX_VALUE).setIdleTimeoutUnit(TimeUnit.MILLISECONDS));
   }
 
   @Override

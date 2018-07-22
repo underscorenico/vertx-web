@@ -20,6 +20,7 @@ import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpVersion;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpClient;
+import io.vertx.core.http.HttpHeaders;
 import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpClientRequest;
@@ -33,6 +34,7 @@ import io.vertx.ext.web.WebTestBase;
 import org.junit.Test;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.text.DateFormat;
 import java.util.List;
 import java.util.ArrayList;
@@ -253,6 +255,89 @@ public class StaticHandlerTest extends WebTestBase {
   }
 
   @Test
+  public void testSkipCompressionForMediaTypes() throws Exception {
+    Set<String> compressedMediaTypes = new HashSet<>();
+    compressedMediaTypes.add("image/jpeg");
+    stat.skipCompressionForMediaTypes(compressedMediaTypes);
+    router.route().handler(stat);
+
+    waitFor(4);
+    server.close();
+    server = vertx.createHttpServer(getHttpServerOptions().setCompressionSupported(true));
+    server.requestHandler(router).listen(8444);
+
+    final List<CharSequence> acceptEncodings = new ArrayList<CharSequence>();
+    acceptEncodings.add("gzip");
+    acceptEncodings.add("jpg");
+    acceptEncodings.add("jpeg");
+    acceptEncodings.add("png");
+    final String[] routes = {"/testCompressionSuffix.html", "/somedir/range.jpg", "/somedir/range.jpeg", "/somedir3/coin.png"};
+    final int[] statusCodes = new int[4];
+    final String[] contentEncodings = new String[4];
+
+    for (int i = 0; i < 4; i++) {
+      int finalI = i;
+      HttpClientRequest request = client.get(8444, "localhost", routes[i], resp -> {
+        statusCodes[finalI] = resp.statusCode();
+        contentEncodings[finalI] = resp.getHeader(HttpHeaders.CONTENT_ENCODING);
+        complete();
+      });
+      request.putHeader(HttpHeaders.ACCEPT_ENCODING, acceptEncodings);
+      request.end();
+    }
+    await();
+
+    final int successCode = 200;
+    //jpeg and jpg have the same mime type, hence both are not compressed
+    final CharSequence[] expectedContentEncodings = {"gzip", HttpHeaders.IDENTITY, HttpHeaders.IDENTITY, "gzip"};
+    for (int i = 0; i < 4; i++) {
+      assertEquals("Status code does not equal 200 for request " + (i+1), successCode, statusCodes[i]);
+      assertEquals("Content-Encoding did not match for request " + (i+1), expectedContentEncodings[i].toString(), contentEncodings[i]);
+    }
+  }
+
+  @Test
+  public void testSkipCompressionForSuffixes() throws Exception {
+    Set<String> compressedSuffixes = new HashSet<>();
+    compressedSuffixes.add("jpg");
+    stat.skipCompressionForSuffixes(compressedSuffixes);
+    router.route().handler(stat);
+
+    waitFor(4);
+    server.close();
+    server = vertx.createHttpServer(getHttpServerOptions().setCompressionSupported(true));
+    server.requestHandler(router).listen(8444);
+
+    final List<CharSequence> acceptEncodings = new ArrayList<CharSequence>();
+    acceptEncodings.add("gzip");
+    acceptEncodings.add("jpg");
+    acceptEncodings.add("jpeg");
+    acceptEncodings.add("png");
+    final String[] routes = {"/testCompressionSuffix.html", "/somedir/range.jpg", "/somedir/range.jpeg", "/somedir3/coin.png"};
+    final int[] statusCodes = new int[4];
+    final String[] contentEncodings = new String[4];
+
+    for (int i = 0; i < 4; i++) {
+      int finalI = i;
+      HttpClientRequest request = client.get(8444, "localhost", routes[i], resp -> {
+        statusCodes[finalI] = resp.statusCode();
+        contentEncodings[finalI] = resp.getHeader(HttpHeaders.CONTENT_ENCODING);
+        complete();
+      });
+      request.putHeader(HttpHeaders.ACCEPT_ENCODING, acceptEncodings);
+      request.end();
+    }
+    await();
+
+    final int successCode = 200;
+    final CharSequence[] expectedContentEncodings = {"gzip", HttpHeaders.IDENTITY, "gzip", "gzip"};
+    for (int i = 0; i < 4; i++) {
+      assertEquals("Status code does not equal 200 for request " + (i+1), successCode, statusCodes[i]);
+      assertEquals("Content-Encoding did not match for request " + (i+1), expectedContentEncodings[i].toString(), contentEncodings[i]);
+    }
+  }
+
+  @Test
   public void testHead() throws Exception {
     CountDownLatch latch = new CountDownLatch(1);
     testRequest(HttpMethod.HEAD, "/otherpage.html", null, res -> {
@@ -319,6 +404,28 @@ public class StaticHandlerTest extends WebTestBase {
       assertEquals("public, max-age=" + StaticHandler.DEFAULT_MAX_AGE_SECONDS, cacheControl);
     }, 200, "OK", "<html><body>Other page</body></html>");
     testRequest(HttpMethod.GET, "/otherpage.html", req -> req.putHeader("if-modified-since", dateTimeFormatter.format(toDateTime(lastModifiedRef.get()) - 1)), res -> {
+    }, 200, "OK", "<html><body>Other page</body></html>");
+  }
+  
+  @Test
+  public void testCacheNotOverwritingCacheControlHeaderValues() throws Exception {
+    router.clear();
+    router.route().order(0).handler(context -> {
+      context.response().putHeader("cache-control", "test1");
+      context.response().putHeader("last-modified", "test2");
+      context.response().putHeader("vary", "test3");
+      
+      context.next();
+    });
+    router.route().order(2).handler(stat);
+    
+    testRequest(HttpMethod.GET, "/otherpage.html", req -> req.putHeader("accept-encoding", "gzip"), res -> {
+      String cacheControl = res.headers().get("cache-control");
+      String lastModified = res.headers().get("last-modified");
+      String vary = res.headers().get("vary");
+      assertEquals("test1", cacheControl);
+      assertEquals("test2", lastModified);
+      assertEquals("test3", vary);
     }, 200, "OK", "<html><body>Other page</body></html>");
   }
 
@@ -399,29 +506,60 @@ public class StaticHandlerTest extends WebTestBase {
 
   @Test
   public void testCacheFilesEntryOld() throws Exception {
+	String webroot = "src/test/filesystemwebroot", page = "/fspage.html";
+	File resource = new File(webroot + page);
+	String html = new String(Files.readAllBytes(resource.toPath()));
+	int cacheEntryTimeout = 100;
+
     stat.setFilesReadOnly(false);
-    stat.setWebRoot("src/test/filesystemwebroot");
-    stat.setCacheEntryTimeout(2000);
-    File resource = new File("src/test/filesystemwebroot", "fspage.html");
+    stat.setWebRoot(webroot);
+    stat.setCacheEntryTimeout(cacheEntryTimeout);
+
     long modified = Utils.secondsFactor(resource.lastModified());
-    testRequest(HttpMethod.GET, "/fspage.html", null, res -> {
+    testRequest(HttpMethod.GET, page, null, res -> {
       String lastModified = res.headers().get("last-modified");
       assertEquals(modified, toDateTime(lastModified));
       // Now update the web resource
       resource.setLastModified(modified + 1000);
-    }, 200, "OK", "<html><body>File system page</body></html>");
+    }, 200, "OK", html);
     // But it should return a new entry as the entry is now old
-    Thread.sleep(2001);
-    testRequest(HttpMethod.GET, "/fspage.html", req -> req.putHeader("if-modified-since", dateTimeFormatter.format(modified)), res -> {
+    Thread.sleep(cacheEntryTimeout + 1);
+    testRequest(HttpMethod.GET, page, req -> req.putHeader("if-modified-since", dateTimeFormatter.format(modified)), res -> {
       String lastModified = res.headers().get("last-modified");
       assertEquals(modified + 1000, toDateTime(lastModified));
-    }, 200, "OK", "<html><body>File system page</body></html>");
+    }, 200, "OK", html);
+
+    // 304 must still work when cacheEntry.isOutOfDate() == true, https://github.com/vert-x3/vertx-web/issues/726
+    Thread.sleep(cacheEntryTimeout + 1);
+
+    testRequest(HttpMethod.GET, page, req -> req.putHeader("if-modified-since", dateTimeFormatter.format(modified + 1000)), 304, "Not Modified", null);
+  }
+
+  @Test
+  public void testCacheFilesFileDeleted() throws Exception {
+    File webroot = new File(".vertx/webroot"), pageFile = new File(webroot, "deleted.html");
+    if (!pageFile.exists()) {
+      webroot.mkdirs();
+      pageFile.createNewFile();
+    }
+    String page = '/' + pageFile.getName();
+
+    stat.setFilesReadOnly(false);
+    stat.setWebRoot(webroot.getPath());
+    stat.setCacheEntryTimeout(3600 * 1000);
+
+    long modified = Utils.secondsFactor(pageFile.lastModified());
+    testRequest(HttpMethod.GET, page, req -> req.putHeader("if-modified-since", dateTimeFormatter.format(modified)), null, 304, "Not Modified", null);
+    pageFile.delete();
+    testRequest(HttpMethod.GET, page, 404, "Not Found");
+    testRequest(HttpMethod.GET, page, req -> req.putHeader("if-modified-since", dateTimeFormatter.format(modified)), null, 404, "Not Found", null);
+
   }
 
   @Test
   public void testDirectoryListingText() throws Exception {
     stat.setDirectoryListing(true);
-    Set<String> expected = new HashSet<>(Arrays.asList(".hidden.html", "a", "foo.json", "index.html", "otherpage.html", "somedir", "somedir2", "somedir3", "file with spaces.html"));
+    Set<String> expected = new HashSet<>(Arrays.asList(".hidden.html", "a", "foo.json", "index.html", "otherpage.html", "somedir", "somedir2", "somedir3", "testCompressionSuffix.html", "file with spaces.html"));
     testRequest(HttpMethod.GET, "/", null, resp -> {
       resp.bodyHandler(buff -> {
         String sBuff = buff.toString();
@@ -438,7 +576,7 @@ public class StaticHandlerTest extends WebTestBase {
   public void testDirectoryListingTextNoHidden() throws Exception {
     stat.setDirectoryListing(true);
     stat.setIncludeHidden(false);
-    Set<String> expected = new HashSet<>(Arrays.asList("foo.json", "a", "index.html", "otherpage.html", "somedir", "somedir2", "somedir3", "file with spaces.html"));
+    Set<String> expected = new HashSet<>(Arrays.asList("foo.json", "a", "index.html", "otherpage.html", "somedir", "somedir2", "somedir3", "testCompressionSuffix.html", "file with spaces.html"));
     testRequest(HttpMethod.GET, "/", null, resp -> {
       resp.bodyHandler(buff -> {
         assertEquals("text/plain", resp.headers().get("content-type"));
@@ -455,7 +593,7 @@ public class StaticHandlerTest extends WebTestBase {
   @Test
   public void testDirectoryListingJson() throws Exception {
     stat.setDirectoryListing(true);
-    Set<String> expected = new HashSet<>(Arrays.asList(".hidden.html", "foo.json", "index.html", "otherpage.html", "a", "somedir", "somedir2", "somedir3", "file with spaces.html"));
+    Set<String> expected = new HashSet<>(Arrays.asList(".hidden.html", "foo.json", "index.html", "otherpage.html", "a", "somedir", "somedir2", "somedir3", "testCompressionSuffix.html", "file with spaces.html"));
     testRequest(HttpMethod.GET, "/", req -> {
       req.putHeader("accept", "application/json");
     }, resp -> {
@@ -477,7 +615,7 @@ public class StaticHandlerTest extends WebTestBase {
   public void testDirectoryListingJsonNoHidden() throws Exception {
     stat.setDirectoryListing(true);
     stat.setIncludeHidden(false);
-    Set<String> expected = new HashSet<>(Arrays.asList("foo.json", "a", "index.html", "otherpage.html", "somedir", "somedir2", "somedir3", "file with spaces.html"));
+    Set<String> expected = new HashSet<>(Arrays.asList("foo.json", "a", "index.html", "otherpage.html", "somedir", "somedir2", "somedir3", "testCompressionSuffix.html", "file with spaces.html"));
     testRequest(HttpMethod.GET, "/", req -> {
       req.putHeader("accept", "application/json");
     }, resp -> {
